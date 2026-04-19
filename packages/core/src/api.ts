@@ -46,15 +46,12 @@ export const API = {
       return null;
     }
 
-    // 2. Fetch their public habits and check-ins (requires updated RLS policies)
-    const [habitsRes, checkInsRes] = await Promise.all([
-      supabase.from('habits').select('*').eq('user_id', profileData.id),
-      // We cannot easily filter check_ins by user_id directly if it's not on the table.
-      // But we can fetch check_ins whose habit_id is in their habits.
-      // The easiest way: Get their habits first, then fetch checkins IN that habit list,
-      // OR let Supabase RLS handle what is returned by just fetching all. Wait...
-      // Fetching all check_ins without filter is BAD. Let's fetch the habits first.
-    ]);
+    // 2. Fetch their public habits
+    const habitsRes = await supabase
+      .from('habits')
+      .select('*')
+      .eq('user_id', profileData.id);
+
 
     // Let's re-fetch checkins intelligently
     const habits: Habit[] = habitsRes.data || [];
