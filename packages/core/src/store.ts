@@ -144,3 +144,48 @@ export const calculateStreak = (checkIns: CheckIn[], habitId: string): number =>
   const habitCheckIns = checkIns.filter(c => c.habit_id === habitId && c.completed).sort((a, b) => b.date.localeCompare(a.date));
   return habitCheckIns.length;
 };
+
+export const calculateConsecutiveStreak = (checkIns: CheckIn[], habitId: string): number => {
+  const habitCheckIns = checkIns
+    .filter(c => c.habit_id === habitId && c.completed)
+    .map(c => c.date)
+    .sort((a, b) => b.localeCompare(a)); // Newest first
+
+  if (habitCheckIns.length === 0) return 0;
+
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  const formatDate = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const todayStr = formatDate(today);
+  const yesterdayStr = formatDate(yesterday);
+
+  // If no check-in today and no check-in yesterday, streak is zero
+  if (habitCheckIns[0] !== todayStr && habitCheckIns[0] !== yesterdayStr) {
+    return 0;
+  }
+
+  let streak = 0;
+  let current = new Date(habitCheckIns[0]);
+
+  for (let i = 0; i < habitCheckIns.length; i++) {
+    const checkDate = habitCheckIns[i];
+    const expectedStr = formatDate(current);
+
+    if (checkDate === expectedStr) {
+      streak++;
+      current.setDate(current.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+
+  return streak;
+};
