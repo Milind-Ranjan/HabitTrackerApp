@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from './supabase';
+import { useToastStore } from './toastStore';
 
 export interface Habit {
   id: string;
@@ -7,6 +8,8 @@ export interface Habit {
   title: string;
   color: string;
   target_days: number;
+  display_order: number;
+  is_archived: boolean;
 }
 
 export interface CheckIn {
@@ -29,8 +32,10 @@ interface HabitState {
   clearState: () => void;
   fetchData: () => Promise<void>;
   updateProfileVisibility: (isPublic: boolean) => Promise<void>;
-  addHabitDB: (habit: Omit<Habit, 'id' | 'user_id'>) => Promise<void>;
+  addHabitDB: (habit: Omit<Habit, 'id' | 'user_id' | 'display_order' | 'is_archived'>) => Promise<void>;
   deleteHabitDB: (habitId: string) => Promise<void>;
+  archiveHabitDB: (habitId: string, isArchived: boolean) => Promise<void>;
+  reorderHabitsDB: (newHabits: Habit[]) => Promise<void>;
   toggleCheckInDB: (habitId: string, date: string) => Promise<void>;
 }
 
@@ -56,7 +61,7 @@ export const useHabitStore = create<HabitState>()((set, get) => ({
       // Get profile and habits first
       const [profileRes, habitsRes] = await Promise.all([
         supabase.from('profiles').select('id, username, is_public, created_at').eq('id', userData.user.id).single(),
-        supabase.from('habits').select('*').eq('user_id', userData.user.id)
+        supabase.from('habits').select('*').eq('user_id', userData.user.id).order('display_order', { ascending: true })
       ]);
 
       if (profileRes.data) set({ profile: profileRes.data });
@@ -100,16 +105,17 @@ export const useHabitStore = create<HabitState>()((set, get) => ({
 
     if (error) {
       console.error("Update visibility error:", error);
-      alert("Failed to update privacy settings.");
+      useToastStore.getState().addToast({ message: "Failed to update privacy settings", type: 'error' });
     } else {
       set({ profile: { ...profile, is_public } });
+      useToastStore.getState().addToast({ message: `Profile is now ${is_public ? 'public' : 'private'}`, type: 'success' });
     }
   },
 
   addHabitDB: async (habit) => {
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) {
-        alert("Session lost! Please log out and back in.");
+        useToastStore.getState().addToast({ message: "Session lost! Please log in again.", type: 'error' });
         return;
     }
 
@@ -119,11 +125,57 @@ export const useHabitStore = create<HabitState>()((set, get) => ({
 
     if (error) {
        console.error("Supabase insert habit error:", error);
-       alert("Failed to save habit to database: " + error.message);
+       useToastStore.getState().addToast({ message: "Failed to save habit: " + error.message, type: 'error' });
     }
 
     if (data) {
        set((state) => ({ habits: [...state.habits, data] }));
+       useToastStore.getState().addToast({ message: `Habit "${data.title}" launched!`, type: 'success' });
+    }
+  },
+
+  archiveHabitDB: async (habitId, is_archived) => {
+    const { error } = await supabase
+      .from('habits')
+      .update({ is_archived })
+      .eq('id', habitId);
+
+    if (error) {
+      console.error("Archive habit error:", error);
+      useToastStore.getState().addToast({ message: "Failed to archive habit", type: 'error' });
+    } else {
+      set((state) => ({
+        habits: state.habits.map(h => h.id === habitId ? { ...h, is_archived } : h)
+      }));
+      useToastStore.getState().addToast({ 
+        message: is_archived ? "Habit archived" : "Habit restored", 
+        type: 'success' 
+      });
+    }
+  },
+
+  reorderHabitsDB: async (newHabits) => {
+    // Optimistic UI update
+    set({ habits: newHabits });
+
+    // Update orders in DB
+    const updates = newHabits.map((h, index) => ({
+      id: h.id,
+      display_order: index,
+      user_id: h.user_id, // Required for upsert sometimes depending on RLS
+      title: h.title,
+      color: h.color,
+      target_days: h.target_days,
+      is_archived: h.is_archived
+    }));
+
+    const { error } = await supabase.from('habits').upsert(updates);
+    
+    if (error) {
+      console.error("Reorder error:", error);
+      useToastStore.getState().addToast({ message: "Failed to save new order", type: 'error' });
+      // Rollback? Usually re-fetch is safer
+      get().fetchData();
     }
   },
 
@@ -132,7 +184,9 @@ export const useHabitStore = create<HabitState>()((set, get) => ({
     const { error } = await supabase.from('habits').delete().eq('id', habitId);
     if (error) {
        console.error("Supabase delete habit error:", error);
-       alert("Failed to delete habit from database: " + error.message);
+       useToastStore.getState().addToast({ message: "Failed to delete habit: " + error.message, type: 'error' });
+    } else {
+       useToastStore.getState().addToast({ message: "Habit deleted successfully", type: 'success' });
     }
     
     // Cleanup state
@@ -152,7 +206,7 @@ export const useHabitStore = create<HabitState>()((set, get) => ({
        const { error } = await supabase.from('check_ins').delete().eq('id', existing.id);
        if(error) {
            console.error("Remove checkin err:", error);
-           alert("Failed to remove check-in: " + error.message);
+           useToastStore.getState().addToast({ message: "Failed to remove check-in: " + error.message, type: 'error' });
        }
     } else {
        const { data, error } = await supabase.from('check_ins').insert([
@@ -161,7 +215,7 @@ export const useHabitStore = create<HabitState>()((set, get) => ({
        
        if (error) {
            console.error("Toggle checkin err:", error);
-           alert("Failed to check-in: " + error.message);
+           useToastStore.getState().addToast({ message: "Failed to check-in: " + error.message, type: 'error' });
        }
        
        if (data) {
@@ -172,8 +226,7 @@ export const useHabitStore = create<HabitState>()((set, get) => ({
 }));
 
 export const calculateStreak = (checkIns: CheckIn[], habitId: string): number => {
-  const habitCheckIns = checkIns.filter(c => c.habit_id === habitId && c.completed).sort((a, b) => b.date.localeCompare(a.date));
-  return habitCheckIns.length;
+  return checkIns.filter(c => c.habit_id === habitId && c.completed).length;
 };
 
 export const calculateConsecutiveStreak = (checkIns: CheckIn[], habitId: string): number => {
