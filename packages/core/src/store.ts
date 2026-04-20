@@ -22,6 +22,7 @@ interface HabitState {
   profile: Profile | null;
   habits: Habit[];
   checkIns: CheckIn[];
+  isLoading: boolean;
   setProfile: (profile: Profile | null) => void;
   setHabits: (habits: Habit[]) => void;
   setCheckIns: (checkIns: CheckIn[]) => void;
@@ -37,25 +38,55 @@ export const useHabitStore = create<HabitState>()((set, get) => ({
   profile: null,
   habits: [],
   checkIns: [],
+  isLoading: false,
   setProfile: (profile) => set({ profile }),
   setHabits: (habits) => set({ habits }),
   setCheckIns: (checkIns) => set({ checkIns }),
   clearState: () => set({ profile: null, habits: [], checkIns: [] }),
   
   fetchData: async () => {
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) return;
+    set({ isLoading: true });
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) {
+        set({ isLoading: false });
+        return;
+      }
 
-    const [profileRes, habitsRes, checkInsRes] = await Promise.all([
-      supabase.from('profiles').select('id, username, is_public, created_at').eq('id', userData.user.id).single(),
-      supabase.from('habits').select('*').eq('user_id', userData.user.id),
-      supabase.from('check_ins').select('*')
-    ]);
+      // Get profile and habits first
+      const [profileRes, habitsRes] = await Promise.all([
+        supabase.from('profiles').select('id, username, is_public, created_at').eq('id', userData.user.id).single(),
+        supabase.from('habits').select('*').eq('user_id', userData.user.id)
+      ]);
 
-    if (profileRes.data) set({ profile: profileRes.data });
-
-    if (habitsRes.data) set({ habits: habitsRes.data });
-    if (checkInsRes.data) set({ checkIns: checkInsRes.data });
+      if (profileRes.data) set({ profile: profileRes.data });
+      
+      if (habitsRes.data) {
+        set({ habits: habitsRes.data });
+        
+        // Efficiently fetch check-ins only for the user's habits
+        const habitIds = habitsRes.data.map(h => h.id);
+        if (habitIds.length > 0) {
+          const { data: checkInsData, error: checkInsError } = await supabase
+            .from('check_ins')
+            .select('*')
+            .in('habit_id', habitIds);
+          
+          if (checkInsError) {
+            console.error("Error fetching check-ins:", checkInsError);
+          } else if (checkInsData) {
+            set({ checkIns: checkInsData });
+          }
+        } else {
+          // No habits, so definitely no check-ins
+          set({ checkIns: [] });
+        }
+      }
+    } catch (e) {
+      console.error("Error in fetchData:", e);
+    } finally {
+      set({ isLoading: false });
+    }
   },
 
   updateProfileVisibility: async (is_public) => {
