@@ -119,17 +119,33 @@ export const useHabitStore = create<HabitState>()((set, get) => ({
         return;
     }
 
+    // Optimistic UI: Add local state with temp ID
+    const optimisticHabit: Habit = {
+      ...habit,
+      id: crypto.randomUUID(),
+      user_id: userData.user.id,
+      display_order: get().habits.length,
+      is_archived: false
+    };
+
+    set(state => ({ habits: [...state.habits, optimisticHabit] }));
+
     const { data, error } = await supabase.from('habits').insert([
        { ...habit, user_id: userData.user.id }
     ]).select().single();
 
     if (error) {
        console.error("Supabase insert habit error:", error);
+       // Rollback: Remove the optimistic habit
+       set(state => ({ habits: state.habits.filter(h => h.id !== optimisticHabit.id) }));
        useToastStore.getState().addToast({ message: "Failed to save habit: " + error.message, type: 'error' });
     }
 
     if (data) {
-       set((state) => ({ habits: [...state.habits, data] }));
+       // Replace optimistic record with real DB record (maintaining local collection)
+       set((state) => ({ 
+         habits: state.habits.map(h => h.id === optimisticHabit.id ? data : h) 
+       }));
        useToastStore.getState().addToast({ message: `Habit "${data.title}" launched!`, type: 'success' });
     }
   },
@@ -180,20 +196,31 @@ export const useHabitStore = create<HabitState>()((set, get) => ({
   },
 
   deleteHabitDB: async (habitId) => {
-    // Delete in supabase
-    const { error } = await supabase.from('habits').delete().eq('id', habitId);
-    if (error) {
-       console.error("Supabase delete habit error:", error);
-       useToastStore.getState().addToast({ message: "Failed to delete habit: " + error.message, type: 'error' });
-    } else {
-       useToastStore.getState().addToast({ message: "Habit deleted successfully", type: 'success' });
-    }
-    
-    // Cleanup state
+    const backupHabit = get().habits.find(h => h.id === habitId);
+    const backupCheckIns = get().checkIns.filter(c => c.habit_id === habitId);
+
+    // Optimistic UI: Cleanup state immediately
     set((state) => ({
       habits: state.habits.filter(h => h.id !== habitId),
       checkIns: state.checkIns.filter(c => c.habit_id !== habitId)
     }));
+
+    // Delete in supabase
+    const { error } = await supabase.from('habits').delete().eq('id', habitId);
+    
+    if (error) {
+       console.error("Supabase delete habit error:", error);
+       // Rollback
+       if (backupHabit) {
+         set(state => ({
+           habits: [...state.habits, backupHabit],
+           checkIns: [...state.checkIns, ...backupCheckIns]
+         }));
+       }
+       useToastStore.getState().addToast({ message: "Failed to delete habit: " + error.message, type: 'error' });
+    } else {
+       useToastStore.getState().addToast({ message: "Habit deleted successfully", type: 'success' });
+    }
   },
 
   toggleCheckInDB: async (habitId, date) => {
