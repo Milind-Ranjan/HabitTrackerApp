@@ -58,7 +58,7 @@ export function HabitChecklist({ days }: { days: string[] }) {
       spread: 60,
       origin: { x: x / window.innerWidth, y: y / window.innerHeight },
       colors: [color, '#ffffff', '#ffd700'],
-      scale: 0.7,
+      scalar: 0.7,
       disableForReducedMotion: true
     });
   };
