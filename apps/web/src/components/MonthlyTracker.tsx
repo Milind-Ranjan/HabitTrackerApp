@@ -10,7 +10,8 @@ import { SplineChart } from './SplineChart';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-export function MonthlyTracker({ monthId }: { monthId: number }) {
+export function MonthlyTracker({ monthId }: { monthId?: number }) {
+  const activeMonthId = monthId || new Date().getMonth() + 1;
   const habits = useHabitStore((state) => state.habits);
   const checkIns = useHabitStore((state) => state.checkIns);
   const profile = useHabitStore((state) => state.profile);
@@ -28,14 +29,14 @@ export function MonthlyTracker({ monthId }: { monthId: number }) {
   }
 
   const currentYear = new Date().getFullYear();
-  const monthName = MONTHS[monthId - 1];
+  const monthName = MONTHS[activeMonthId - 1];
 
   // Calculate joining date in YYYY-MM-DD format
   const joiningDateStr = profile?.created_at ? new Date(profile.created_at).toISOString().split('T')[0] : '1970-01-01';
 
   // Calculate specific days in this month
-  const daysInMonth = new Date(currentYear, monthId, 0).getDate();
-  const monthStr = String(monthId).padStart(2, '0');
+  const daysInMonth = new Date(currentYear, activeMonthId, 0).getDate();
+  const monthStr = String(activeMonthId).padStart(2, '0');
 
   // Create array of ISODates for this month [YYYY-MM-01, YYYY-MM-02...]
   const allDaysInMonth = Array.from({ length: daysInMonth }, (_, i) => {
